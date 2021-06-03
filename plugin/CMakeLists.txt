@@ -31,6 +31,7 @@ set(PLUGIN_CU_SOURCES)
 
 set(PLUGIN_LISTS
     batchedNMSPlugin
+    nonMaxSuppressionPlugin
     batchTilePlugin
     coordConvACPlugin
     cropAndResizePlugin
