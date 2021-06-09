@@ -58,10 +58,7 @@ __launch_bounds__(nthds_per_cta)
         const int* indices,
         const T_SCORE* scores,
         const T_BBOX* bboxData,
-        int* numDetections,
-        T_BBOX* nmsedBoxes,
-        T_BBOX* nmsedScores,
-        T_BBOX* nmsedClasses,
+        int* nmsedResult,
         bool clipBoxes,
         const T_SCORE scoreShift
         )
@@ -75,38 +72,24 @@ __launch_bounds__(nthds_per_cta)
         const int imgId = i / keepTopK;
         const int detId = i % keepTopK;
         const int offset = imgId * numClasses * topK;
-        const int index = indices[offset + detId];
-        const T_SCORE score = scores[offset + detId];
+        const int index = indices[offset + detId]; 
+        //const T_SCORE score = scores[offset + detId];
         if (index == -1)
         {
-            nmsedClasses[i] = -1;
-            nmsedScores[i] = 0;
-            nmsedBoxes[i * 4] = 0;
-            nmsedBoxes[i * 4 + 1] = 0;
-            nmsedBoxes[i * 4 + 2] = 0;
-            nmsedBoxes[i * 4 + 3] = 0;
+            nmsedResult[i] = -1;
+            nmsedResult[i+1] = -1;
+            nmsedResult[i+2] = -1;
         }
         else
         {
             const int bboxOffset = imgId * (shareLocation ? numPredsPerClass : (numClasses * numPredsPerClass));
             const int bboxId = ((shareLocation ? (index % numPredsPerClass)
                         : index % (numClasses * numPredsPerClass)) + bboxOffset) * 4;
-            nmsedClasses[i] = (index % (numClasses * numPredsPerClass)) / numPredsPerClass; // label
-            nmsedScores[i] = score;                                                        // confidence score
-            nmsedScores[i] = minus_fb(nmsedScores[i], scoreShift);
-            const T_BBOX xMin = bboxData[bboxId];
-            const T_BBOX yMin = bboxData[bboxId + 1];
-            const T_BBOX xMax = bboxData[bboxId + 2];
-            const T_BBOX yMax = bboxData[bboxId + 3];
-            // clipped bbox xmin
-            nmsedBoxes[i * 4] = clipBoxes ? saturate2(xMin) : xMin;
-            // clipped bbox ymin
-            nmsedBoxes[i * 4 + 1] = clipBoxes ? saturate2(yMin) : yMin;
-            // clipped bbox xmax
-            nmsedBoxes[i * 4 + 2] = clipBoxes ? saturate2(xMax) : xMax;
-            // clipped bbox ymax
-            nmsedBoxes[i * 4 + 3] = clipBoxes ? saturate2(yMax) : yMax;
-            atomicAdd(&numDetections[i / keepTopK], 1);
+            const int classId = (index % (numClasses * numPredsPerClass)) / numPredsPerClass; // label
+            nmsedResult[i] = imgId;
+            nmsedResult[i+1] = classId;
+            nmsedResult[i+2] = bboxId;
+           
         }
     }
 }
@@ -123,24 +106,18 @@ pluginStatus_t gatherNMSOutputs2_gpu(
     const void* indices,
     const void* scores,
     const void* bboxData,
-    void* numDetections,
-    void* nmsedBoxes,
-    void* nmsedScores,
-    void* nmsedClasses,
+    void* nmsedResult,
     bool clipBoxes,
     const float scoreShift
     )
 {
-    cudaMemsetAsync(numDetections, 0, numImages * sizeof(int), stream);
+    //cudaMemsetAsync(numDetections, 0, numImages * sizeof(int), stream);
     const int BS = 32;
     const int GS = 32;
     gatherNMSOutputs2_kernel<T_BBOX, T_SCORE, BS><<<GS, BS, 0, stream>>>(shareLocation, numImages, numPredsPerClass,
                                                                            numClasses, topK, keepTopK,
                                                                            (int*) indices, (T_SCORE*) scores, (T_BBOX*) bboxData,
-                                                                           (int*) numDetections,
-                                                                           (T_BBOX*) nmsedBoxes,
-                                                                           (T_BBOX*) nmsedScores,
-                                                                           (T_BBOX*) nmsedClasses,
+                                                                           (int*) nmsedResult,
                                                                            clipBoxes,
                                                                            T_SCORE(scoreShift)
                                                                             );
@@ -160,9 +137,6 @@ typedef pluginStatus_t (*nmsOutFunc)(cudaStream_t,
                                const void*,
                                const void*,
                                const void*,
-                               void*,
-                               void*,
-                               void*,
                                void*,
                                bool,
                                const float);
@@ -209,10 +183,7 @@ pluginStatus_t gatherNMSOutputs2(
     const void* indices,
     const void* scores,
     const void* bboxData,
-    void* numDetections,
-    void* nmsedBoxes,
-    void* nmsedScores,
-    void* nmsedClasses,
+    void* nmsedResult,
     bool clipBoxes,
     const float scoreShift
     )
@@ -233,10 +204,7 @@ pluginStatus_t gatherNMSOutputs2(
                                           indices,
                                           scores,
                                           bboxData,
-                                          numDetections,
-                                          nmsedBoxes,
-                                          nmsedScores,
-                                          nmsedClasses,
+                                          nmsedResult,
                                           clipBoxes,
                                           scoreShift
                                           );

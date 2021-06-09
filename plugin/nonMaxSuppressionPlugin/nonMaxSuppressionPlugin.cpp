@@ -81,7 +81,7 @@ int NonMaxSuppressionPlugin::getNbOutputs() const noexcept
 
 int NonMaxSuppressionDynamicPlugin::getNbOutputs() const noexcept
 {
-    return 4;
+    return 1;
 }
 
 int NonMaxSuppressionPlugin::initialize() noexcept
@@ -138,21 +138,20 @@ DimsExprs NonMaxSuppressionDynamicPlugin::getOutputDimensions(
     //           shareLocation ==              0               or          1
     // or
     // Dynamic shape: some dimension values may be -1
-    ASSERT(inputs[0].nbDims == 4);
+    ASSERT(inputs[0].nbDims == 3); // ONNX
 
     // Shape of scores input should be
     // Constant shape: [batch_size, num_boxes, num_classes] or [batch_size, num_boxes, num_classes, 1]
     // or
     // Dynamic shape: some dimension values may be -1
     ASSERT(inputs[1].nbDims == 3 || inputs[1].nbDims == 4);
-
-    if (inputs[0].d[0]->isConstant() && inputs[0].d[1]->isConstant() && inputs[0].d[2]->isConstant()
-        && inputs[0].d[3]->isConstant())
+    // ONNX
+    if (inputs[0].d[0]->isConstant() && inputs[0].d[1]->isConstant() && inputs[0].d[2]->isConstant())
     {
         boxesSize = exprBuilder
                         .operation(DimensionOperation::kPROD,
-                            *exprBuilder.operation(DimensionOperation::kPROD, *inputs[0].d[1], *inputs[0].d[2]),
-                            *inputs[0].d[3])
+                            *inputs[0].d[1],
+                            *inputs[0].d[2])
                         ->getConstantValue();
     }
 
@@ -163,34 +162,16 @@ DimsExprs NonMaxSuppressionDynamicPlugin::getOutputDimensions(
     }
 
     DimsExprs out_dim;
-    // num_detections
+    // nmsedResult
     if (outputIndex == 0)
     {
-        out_dim.nbDims = 2;
-        out_dim.d[0] = inputs[0].d[0];
-        out_dim.d[1] = exprBuilder.constant(1);
-    }
-    // nmsed_boxes
-    else if (outputIndex == 1)
-    {
         out_dim.nbDims = 3;
+        // std::cout << "inputs[0].d[0]: " << (inputs[0].d[0])->getConstantValue() << std::endl;
+        std::cout << "param.TopK: " << param.topK << std::endl;  
+        std::cout << "param.keepTopK: " << param.keepTopK << std::endl;        
         out_dim.d[0] = inputs[0].d[0];
         out_dim.d[1] = exprBuilder.constant(param.keepTopK);
-        out_dim.d[2] = exprBuilder.constant(4);
-    }
-    // nmsed_scores
-    else if (outputIndex == 2)
-    {
-        out_dim.nbDims = 2;
-        out_dim.d[0] = inputs[0].d[0];
-        out_dim.d[1] = exprBuilder.constant(param.keepTopK);
-    }
-    // nmsed_classes
-    else
-    {
-        out_dim.nbDims = 2;
-        out_dim.d[0] = inputs[0].d[0];
-        out_dim.d[1] = exprBuilder.constant(param.keepTopK);
+        out_dim.d[2] = exprBuilder.constant(3);
     }
 
     return out_dim;
@@ -212,19 +193,19 @@ size_t NonMaxSuppressionDynamicPlugin::getWorkspaceSize(
 int NonMaxSuppressionPlugin::enqueue(
     int batchSize, const void* const* inputs, void** outputs, void* workspace, cudaStream_t stream) noexcept
 {
-    const void* const locData = inputs[0];
-    const void* const confData = inputs[1];
+    // const void* const locData = inputs[0];
+    // const void* const confData = inputs[1];
 
-    void* keepCount = outputs[0];
-    void* nmsedBoxes = outputs[1];
-    void* nmsedScores = outputs[2];
-    void* nmsedClasses = outputs[3];
+    // void* keepCount = outputs[0];
+    // void* nmsedBoxes = outputs[1];
+    // void* nmsedScores = outputs[2];
+    // void* nmsedClasses = outputs[3];
 
-    pluginStatus_t status = nmsInference2(stream, batchSize, boxesSize, scoresSize, param.shareLocation,
-        param.backgroundLabelId, numPriors, param.numClasses, param.topK, param.keepTopK, param.scoreThreshold,
-        param.iouThreshold, mPrecision, locData, mPrecision, confData, keepCount, nmsedBoxes, nmsedScores, nmsedClasses,
-        workspace, param.isNormalized, false, mClipBoxes, mScoreBits);
-    ASSERT(status == STATUS_SUCCESS);
+    // pluginStatus_t status = nmsInference2(stream, batchSize, boxesSize, scoresSize, param.shareLocation,
+    //     param.backgroundLabelId, numPriors, param.numClasses, param.topK, param.keepTopK, param.scoreThreshold,
+    //     param.iouThreshold, mPrecision, locData, mPrecision, confData, keepCount, nmsedBoxes, nmsedScores, nmsedClasses,
+    //     workspace, param.isNormalized, false, mClipBoxes, mScoreBits);
+    // ASSERT(status == STATUS_SUCCESS);
     return 0;
 }
 
@@ -234,14 +215,11 @@ int NonMaxSuppressionDynamicPlugin::enqueue(const PluginTensorDesc* inputDesc, c
     const void* const locData = inputs[0];
     const void* const confData = inputs[1];
 
-    void* keepCount = outputs[0];
-    void* nmsedBoxes = outputs[1];
-    void* nmsedScores = outputs[2];
-    void* nmsedClasses = outputs[3];
+    void* nmsedResult = outputs[0];
 
     pluginStatus_t status = nmsInference2(stream, inputDesc[0].dims.d[0], boxesSize, scoresSize, param.shareLocation,
         param.backgroundLabelId, numPriors, param.numClasses, param.topK, param.keepTopK, param.scoreThreshold,
-        param.iouThreshold, mPrecision, locData, mPrecision, confData, keepCount, nmsedBoxes, nmsedScores, nmsedClasses,
+        param.iouThreshold, mPrecision, locData, mPrecision, confData, nmsedResult,
         workspace, param.isNormalized, false, mClipBoxes, mScoreBits);
     ASSERT(status == STATUS_SUCCESS);
     return 0;
@@ -311,21 +289,17 @@ void NonMaxSuppressionDynamicPlugin::configurePlugin(
     const DynamicPluginTensorDesc* in, int nbInputs, const DynamicPluginTensorDesc* out, int nbOutputs) noexcept
 {
     ASSERT(nbInputs == 2);
-    ASSERT(nbOutputs == 4);
+    ASSERT(nbOutputs == 1);
 
-    // Shape of boxes input should be
-    // Constant shape: [batch_size, num_boxes, num_classes, 4] or [batch_size, num_boxes, 1, 4]
-    //           shareLocation ==              0               or          1
     const int numLocClasses = param.shareLocation ? 1 : param.numClasses;
-    ASSERT(in[0].desc.dims.nbDims == 4);
-    ASSERT(in[0].desc.dims.d[2] == numLocClasses);
-    ASSERT(in[0].desc.dims.d[3] == 4);
+    ASSERT(in[0].desc.dims.nbDims == 3);
+    ASSERT(in[0].desc.dims.d[2] == 4);
 
     // Shape of scores input should be
-    // Constant shape: [batch_size, num_boxes, num_classes] or [batch_size, num_boxes, num_classes, 1]
+    // Constant shape: [batch_size, num_classes， num_boxes] or [batch_size, num_classes， num_boxes, 1]
     ASSERT(in[1].desc.dims.nbDims == 3 || (in[1].desc.dims.nbDims == 4 && in[1].desc.dims.d[3] == 1));
 
-    boxesSize = in[0].desc.dims.d[1] * in[0].desc.dims.d[2] * in[0].desc.dims.d[3];
+    boxesSize = in[0].desc.dims.d[1] * in[0].desc.dims.d[2];
     scoresSize = in[1].desc.dims.d[1] * in[1].desc.dims.d[2];
     // num_boxes
     numPriors = in[0].desc.dims.d[1];
@@ -342,7 +316,7 @@ bool NonMaxSuppressionPlugin::supportsFormat(DataType type, PluginFormat format)
 bool NonMaxSuppressionDynamicPlugin::supportsFormatCombination(
     int pos, const PluginTensorDesc* inOut, int nbInputs, int nbOutputs) noexcept
 {
-    ASSERT(0 <= pos && pos < 6);
+    ASSERT(0 <= pos && pos < 3);
     const auto* in = inOut;
     const auto* out = inOut + nbInputs;
     const bool consistentFloatPrecision = in[0].type == in[pos].type;
@@ -355,15 +329,6 @@ bool NonMaxSuppressionDynamicPlugin::supportsFormatCombination(
         return (in[1].type == DataType::kHALF || in[1].type == DataType::kFLOAT)
             && in[1].format == PluginFormat::kLINEAR && consistentFloatPrecision;
     case 2: return out[0].type == DataType::kINT32 && out[0].format == PluginFormat::kLINEAR;
-    case 3:
-        return (out[1].type == DataType::kHALF || out[1].type == DataType::kFLOAT)
-            && out[1].format == PluginFormat::kLINEAR && consistentFloatPrecision;
-    case 4:
-        return (out[2].type == DataType::kHALF || out[2].type == DataType::kFLOAT)
-            && out[2].format == PluginFormat::kLINEAR && consistentFloatPrecision;
-    case 5:
-        return (out[3].type == DataType::kHALF || out[3].type == DataType::kFLOAT)
-            && out[3].format == PluginFormat::kLINEAR && consistentFloatPrecision;
     }
     return false;
 }

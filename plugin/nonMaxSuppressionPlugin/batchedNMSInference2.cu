@@ -22,8 +22,8 @@
 pluginStatus_t nmsInference2(cudaStream_t stream, const int N, const int perBatchBoxesSize, const int perBatchScoresSize,
     const bool shareLocation, const int backgroundLabelId, const int numPredsPerClass, const int numClasses,
     const int topK, const int keepTopK, const float scoreThreshold, const float iouThreshold, const DataType DT_BBOX,
-    const void* locData, const DataType DT_SCORE, const void* confData, void* keepCount, void* nmsedBoxes,
-    void* nmsedScores, void* nmsedClasses, void* workspace, bool isNormalized, bool confSigmoid, bool clipBoxes, int scoreBits)
+    const void* locData, const DataType DT_SCORE, const void* confData, 
+    void* nmsedResult, void* workspace, bool isNormalized, bool confSigmoid, bool clipBoxes, int scoreBits)
 {
     // locCount = batch_size * number_boxes_per_sample * 4
     const int locCount = N * perBatchBoxesSize;
@@ -75,7 +75,7 @@ pluginStatus_t nmsInference2(cudaStream_t stream, const int N, const int perBatc
      * Conf data format
      * [batch size, numPriors * param.numClasses, 1, 1]
      */
-    const int numScores = N * perBatchScoresSize;
+    //const int numScores = N * perBatchScoresSize;
     size_t totalScoresSize = detectionForwardPreNMSSize(N, perBatchScoresSize);
     if(DT_SCORE == DataType::kHALF) totalScoresSize /= 2; // detectionForwardPreNMSSize is implemented in terms of kFLOAT
     void* scores = nextWorkspacePtr((int8_t*) bboxPermute, bboxPermuteSize);
@@ -85,9 +85,9 @@ pluginStatus_t nmsInference2(cudaStream_t stream, const int N, const int perBatc
      * After permutation, bboxData format:
      * [batch_size, numClasses, numPredsPerClass, 1]
      */
-    status = permuteData(
-        stream, numScores, numClasses, numPredsPerClass, 1, DT_SCORE, confSigmoid, confData, scores);
-    ASSERT_FAILURE(status == STATUS_SUCCESS);
+    // status = permuteData(
+    //     stream, numScores, numClasses, numPredsPerClass, 1, DT_SCORE, confSigmoid, confData, scores);
+    // ASSERT_FAILURE(status == STATUS_SUCCESS);
 
     size_t indicesSize = detectionForwardPreNMSSize(N, perBatchScoresSize);
     void* indices = nextWorkspacePtr((int8_t*) scores, totalScoresSize);
@@ -124,7 +124,7 @@ pluginStatus_t nmsInference2(cudaStream_t stream, const int N, const int perBatc
 
     // Gather data from the sorted bounding boxes after NMS
     status = gatherNMSOutputs2(stream, shareLocation, N, numPredsPerClass, numClasses, topK, keepTopK, DT_BBOX,
-        DT_SCORE, indices, scores, bboxData, keepCount, nmsedBoxes, nmsedScores, nmsedClasses, clipBoxes, scoreShift);
+        DT_SCORE, indices, scores, bboxData, nmsedResult, clipBoxes, scoreShift);
     ASSERT_FAILURE(status == STATUS_SUCCESS);
 
     return STATUS_SUCCESS;
